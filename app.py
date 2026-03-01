@@ -5,8 +5,7 @@ import cloudinary.uploader
 import cloudinary.api
 import os
 import json
-import psycopg2
-import psycopg2.extras
+import pg8000.native
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,7 +22,7 @@ cloudinary.config(
 )
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "aidoBot2026!")
-DATABASE_URL   = os.getenv("DATABASE_URL")
+DATABASE_URL   = os.getenv("DATABASE_URL", "")
 
 # ─── DEFAULT DATA ────────────────────────────────────────────
 DEFAULT_DATA = {
@@ -61,15 +60,18 @@ DEFAULT_DATA = {
         {"name": "Dr. Sanjay Kumar",     "role": "Mentor & Advisor",             "bio": "Associate Professor advising on medical applications, healthcare integration, and clinical accuracy of the robot's assessments.", "photo": "", "emoji": "⚕️"}
     ],
     "events": [
-        {"title": "Healthcare Innovation Summit", "date": "Mar 2026", "location": "Banjul, The Gambia",         "desc": "AiDoBot will be demonstrating live patient screening and telemedicine capabilities at the region's largest annual health innovation summit.", "icon": "🏥", "image": ""},
-        {"title": "University Tech Expo",         "date": "Apr 2026", "location": "New Delhi, India",           "desc": "Join us at the national university technology fair showcasing AI face analysis and multilingual health screening.", "icon": "🏫", "image": ""},
-        {"title": "Community Health Outreach",    "date": "May 2026", "location": "Rural Communities, West Africa", "desc": "Free health screening drive — bringing AiDoBot directly to underserved rural communities.", "icon": "🌍", "image": ""}
+        {"title": "Healthcare Innovation Summit", "date": "Mar 2026", "location": "Banjul, The Gambia",
+         "desc": "AiDoBot will be demonstrating live patient screening and telemedicine capabilities.", "icon": "🏥", "image": ""},
+        {"title": "University Tech Expo",         "date": "Apr 2026", "location": "New Delhi, India",
+         "desc": "Join us at the national university technology fair showcasing AI face analysis.", "icon": "🏫", "image": ""},
+        {"title": "Community Health Outreach",    "date": "May 2026", "location": "Rural Communities, West Africa",
+         "desc": "Free health screening drive — bringing AiDoBot directly to underserved rural communities.", "icon": "🌍", "image": ""}
     ],
     "announcements": [
         {"icon": "🚀", "date": "Feb 28, 2026", "title": "AiDoBot Version 2.0 Launched",
          "body": "AiDoBot V2.0 features enhanced AI face analysis, improved multilingual support for 12 new languages, and screening under 4 minutes."},
         {"icon": "🤝", "date": "Feb 15, 2026", "title": "New Partnership with Regional Health Ministry",
-         "body": "AiDoBot has entered a formal partnership agreement to deploy robots across 20 public health centres. Rollout begins March 2026."},
+         "body": "AiDoBot has entered a formal partnership to deploy robots across 20 public health centres. Rollout begins March 2026."},
         {"icon": "🏆", "date": "Jan 30, 2026", "title": "AiDoBot Wins Best Health Innovation Award",
          "body": "We are honoured to have received the Best Health Innovation Award at the Africa Tech Summit 2026."}
     ],
@@ -83,52 +85,86 @@ DEFAULT_DATA = {
     "latest_youtube": ""
 }
 
-# ─── DATABASE HELPERS ────────────────────────────────────────
+# ─── DATABASE HELPERS (pg8000 - pure Python, works on 3.14) ──
+
+def parse_db_url(url):
+    """Parse postgresql://user:pass@host/dbname?params into a dict."""
+    # Strip protocol
+    url = url.replace("postgresql://", "").replace("postgres://", "")
+    # Split user:pass@host:port/dbname
+    at = url.index("@")
+    userpass = url[:at]
+    rest = url[at+1:]
+    if ":" in userpass:
+        user, password = userpass.split(":", 1)
+    else:
+        user, password = userpass, ""
+    # host/dbname?params
+    if "?" in rest:
+        hostpart, _ = rest.split("?", 1)
+    else:
+        hostpart = rest
+    if "/" in hostpart:
+        hostport, dbname = hostpart.rsplit("/", 1)
+    else:
+        hostport, dbname = hostpart, "neondb"
+    if ":" in hostport:
+        host, port = hostport.rsplit(":", 1)
+        port = int(port)
+    else:
+        host, port = hostport, 5432
+    return {"host": host, "port": port, "user": user, "password": password, "database": dbname}
+
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+    params = parse_db_url(DATABASE_URL)
+    return pg8000.native.Connection(
+        host=params["host"],
+        port=params["port"],
+        user=params["user"],
+        password=params["password"],
+        database=params["database"],
+        ssl_context=True   # Neon requires SSL
+    )
 
 def init_db():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS site_data (
-                    key   TEXT PRIMARY KEY,
-                    value JSONB NOT NULL
-                );
-            """)
-            conn.commit()
-            for key, value in DEFAULT_DATA.items():
-                cur.execute("""
-                    INSERT INTO site_data (key, value)
-                    VALUES (%s, %s)
-                    ON CONFLICT (key) DO NOTHING;
-                """, (key, json.dumps(value)))
-            conn.commit()
+    conn = get_conn()
+    conn.run("""
+        CREATE TABLE IF NOT EXISTS site_data (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+    for key, value in DEFAULT_DATA.items():
+        conn.run(
+            "INSERT INTO site_data (key, value) VALUES (:key, :value) ON CONFLICT (key) DO NOTHING;",
+            key=key, value=json.dumps(value)
+        )
+    conn.close()
 
 def db_get(key):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT value FROM site_data WHERE key = %s;", (key,))
-            row = cur.fetchone()
-            return row[0] if row else None
+    conn = get_conn()
+    rows = conn.run("SELECT value FROM site_data WHERE key = :key;", key=key)
+    conn.close()
+    if rows:
+        return json.loads(rows[0][0])
+    return None
 
 def db_set(key, value):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO site_data (key, value)
-                VALUES (%s, %s)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-            """, (key, json.dumps(value)))
-            conn.commit()
+    conn = get_conn()
+    conn.run(
+        """INSERT INTO site_data (key, value) VALUES (:key, :value)
+           ON CONFLICT (key) DO UPDATE SET value = :value;""",
+        key=key, value=json.dumps(value)
+    )
+    conn.close()
 
 def load_all_data():
+    conn = get_conn()
+    rows = conn.run("SELECT key, value FROM site_data;")
+    conn.close()
     result = dict(DEFAULT_DATA)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT key, value FROM site_data;")
-            for key, value in cur.fetchall():
-                result[key] = value
+    for key, value in rows:
+        result[key] = json.loads(value)
     return result
 
 # ─── PUBLIC ROUTES ───────────────────────────────────────────
@@ -208,6 +244,6 @@ if __name__ == "__main__":
 else:
     try:
         init_db()
-        print("✅ Neon DB initialized")
+        print("✅ Neon DB initialized successfully")
     except Exception as e:
         print("❌ DB init error:", e)
