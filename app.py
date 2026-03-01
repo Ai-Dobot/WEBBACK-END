@@ -33,23 +33,17 @@ DEFAULT_DATA = {
     "vreviews": [],
     "journey_steps": [
         {"title": "Patient Interaction & Face Detection",
-         "desc": "AiDoBot greets the patient, detects their face, and begins a natural voice conversation in their preferred language.",
-         "video": ""},
+         "desc": "AiDoBot greets the patient, detects their face, and begins a natural voice conversation in their preferred language.", "video": ""},
         {"title": "Health Data Collection",
-         "desc": "The robot guides the patient through each measurement — weight, temperature, blood oxygen, heart rate, and blood pressure.",
-         "video": ""},
+         "desc": "The robot guides the patient through each measurement — weight, temperature, blood oxygen, heart rate, and blood pressure.", "video": ""},
         {"title": "AI Face Analysis",
-         "desc": "The camera captures the patient's face. AI analyses emotion, pallor, fatigue, and age — all added automatically to the patient report.",
-         "video": ""},
+         "desc": "The camera captures the patient's face. AI analyses emotion, pallor, fatigue, and age — all added automatically to the patient report.", "video": ""},
         {"title": "Doctor Consultation",
-         "desc": "Live video call with a verified doctor. The doctor reviews the robot-generated report before speaking.",
-         "video": ""},
+         "desc": "Live video call with a verified doctor. The doctor reviews the robot-generated report before speaking.", "video": ""},
         {"title": "Digital Prescription & Medicine Delivery",
-         "desc": "The doctor issues a digital prescription. Patient orders medicine by voice — delivered to their home.",
-         "video": ""},
+         "desc": "The doctor issues a digital prescription. Patient orders medicine by voice — delivered to their home.", "video": ""},
         {"title": "Lifetime Health Record",
-         "desc": "Every visit is stored securely. Patients access their full health history from any phone, at any time.",
-         "video": ""}
+         "desc": "Every visit is stored securely. Patients access their full health history from any phone, at any time.", "video": ""}
     ],
     "team": [
         {"name": "Abdoukadir Jabbi",     "role": "Inventor & Lead Developer",    "bio": "B.Sc. Computer Science. Technical lead responsible for system architecture, AI integration, and hardware design of AiDoBot.", "photo": "", "emoji": "👨‍💻"},
@@ -85,46 +79,36 @@ DEFAULT_DATA = {
     "latest_youtube": ""
 }
 
-# ─── DATABASE HELPERS (pg8000 - pure Python, works on 3.14) ──
+# ─── DATABASE HELPERS ────────────────────────────────────────
 
 def parse_db_url(url):
-    """Parse postgresql://user:pass@host/dbname?params into a dict."""
-    # Strip protocol
+    """Parse full Neon connection string into pg8000 kwargs."""
+    # Remove protocol prefix
     url = url.replace("postgresql://", "").replace("postgres://", "")
-    # Split user:pass@host:port/dbname
-    at = url.index("@")
+    # Separate query params
+    if "?" in url:
+        url, _ = url.split("?", 1)
+    # Split user:pass@host/db
+    at      = url.rindex("@")
     userpass = url[:at]
-    rest = url[at+1:]
-    if ":" in userpass:
-        user, password = userpass.split(":", 1)
+    hostdb   = url[at+1:]
+    user, password = userpass.split(":", 1) if ":" in userpass else (userpass, "")
+    if "/" in hostdb:
+        hostport, database = hostdb.rsplit("/", 1)
     else:
-        user, password = userpass, ""
-    # host/dbname?params
-    if "?" in rest:
-        hostpart, _ = rest.split("?", 1)
-    else:
-        hostpart = rest
-    if "/" in hostpart:
-        hostport, dbname = hostpart.rsplit("/", 1)
-    else:
-        hostport, dbname = hostpart, "neondb"
+        hostport, database = hostdb, "neondb"
     if ":" in hostport:
         host, port = hostport.rsplit(":", 1)
         port = int(port)
     else:
         host, port = hostport, 5432
-    return {"host": host, "port": port, "user": user, "password": password, "database": dbname}
+    return dict(host=host, port=port, user=user, password=password, database=database)
 
 def get_conn():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is not set!")
     params = parse_db_url(DATABASE_URL)
-    return pg8000.native.Connection(
-        host=params["host"],
-        port=params["port"],
-        user=params["user"],
-        password=params["password"],
-        database=params["database"],
-        ssl_context=True   # Neon requires SSL
-    )
+    return pg8000.native.Connection(ssl_context=True, **params)
 
 def init_db():
     conn = get_conn()
@@ -140,14 +124,7 @@ def init_db():
             key=key, value=json.dumps(value)
         )
     conn.close()
-
-def db_get(key):
-    conn = get_conn()
-    rows = conn.run("SELECT value FROM site_data WHERE key = :key;", key=key)
-    conn.close()
-    if rows:
-        return json.loads(rows[0][0])
-    return None
+    print("✅ Neon DB initialized successfully")
 
 def db_set(key, value):
     conn = get_conn()
@@ -174,12 +151,23 @@ def get_data():
     try:
         return jsonify(load_all_data())
     except Exception as e:
-        print("DB error GET /api/data:", e)
+        print("❌ DB error GET /api/data:", e)
         return jsonify(DEFAULT_DATA)
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "storage": "neon+cloudinary"})
+    db_ok = False
+    try:
+        load_all_data()
+        db_ok = True
+    except Exception as e:
+        print("Health check DB error:", e)
+    return jsonify({
+        "status": "ok",
+        "db_connected": db_ok,
+        "db_url_set": bool(DATABASE_URL),
+        "storage": "neon+cloudinary"
+    })
 
 # ─── ADMIN ROUTES ────────────────────────────────────────────
 
@@ -228,13 +216,13 @@ def update_data():
         db_set(section, payload)
         return jsonify({"ok": True})
     except Exception as e:
-        print("DB error on update:", e)
+        print("❌ DB error on update:", e)
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/contact", methods=["POST"])
 def contact():
     body = request.json or {}
-    print("Contact form:", body)
+    print("📩 Contact form:", body)
     return jsonify({"ok": True, "message": "Message received!"})
 
 # ─── STARTUP ─────────────────────────────────────────────────
@@ -242,8 +230,9 @@ if __name__ == "__main__":
     init_db()
     app.run(debug=True, port=5000)
 else:
+    # Gunicorn entry point
     try:
         init_db()
-        print("✅ Neon DB initialized successfully")
     except Exception as e:
-        print("❌ DB init error:", e)
+        print(f"❌ DB init error: {e}")
+        print("⚠️  Check that DATABASE_URL is set correctly in Render environment variables.")
