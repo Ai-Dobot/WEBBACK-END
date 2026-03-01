@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+app = Flask(__name__, static_folder='static', static_url_path='')
+CORS(app)
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -162,6 +162,12 @@ def get_data():
     except Exception as e:
         print("DB error GET /api/data:", e)
         return jsonify(DEFAULT_DATA)
+
+@app.route("/")
+@app.route("/<path:path>")
+def serve_frontend(path=""):
+    from flask import send_from_directory
+    return send_from_directory(app.static_folder, "index.html")
 
 @app.route("/api/health", methods=["GET"])
 def health():
