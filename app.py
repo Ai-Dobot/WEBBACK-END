@@ -13,7 +13,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ─── CLOUDINARY CONFIG ──────────────────────────────────────
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -27,6 +26,7 @@ DATABASE_URL   = os.getenv("DATABASE_URL", "")
 # ─── DEFAULT DATA ────────────────────────────────────────────
 DEFAULT_DATA = {
     "hero": {"robot_image": "", "headline": "Healthcare that comes to you."},
+    "hero_images": [],
     "stats": {"accuracy": 98, "time_saved": 70, "daily_screenings": 500},
     "gallery": [],
     "reviews_video": [],
@@ -50,8 +50,8 @@ DEFAULT_DATA = {
         {"name": "Anushka",              "role": "AI & Systems Design",           "bio": "Leads AI modelling and intelligent interaction design, ensuring AiDoBot responds naturally and accurately in every situation.", "photo": "", "emoji": "👩‍🔬"},
         {"name": "Isatou I Jallow",      "role": "Accountant & Finance",          "bio": "Manages financial planning, budgeting, and compliance for sustainable and responsible growth.", "photo": "", "emoji": "👩‍💼"},
         {"name": "Nuna",                 "role": "Social Media & Communications", "bio": "Oversees brand communication, digital presence, and strategic messaging to share AiDoBot's mission worldwide.", "photo": "", "emoji": "📣"},
-        {"name": "Dr. Shiv Kumar Verma", "role": "Mentor & Advisor",             "bio": "Professor providing expert guidance on AI development, system architecture, and academic rigor behind AiDoBot's intelligence.", "photo": "", "emoji": "🎓"},
-        {"name": "Dr. Sanjay Kumar",     "role": "Mentor & Advisor",             "bio": "Associate Professor advising on medical applications, healthcare integration, and clinical accuracy of the robot's assessments.", "photo": "", "emoji": "⚕️"}
+        {"name": "Dr. Shiv Kumar Verma", "role": "Mentor & Advisor",             "bio": "Professor providing expert guidance on AI development, system architecture, and academic rigor.", "photo": "", "emoji": "🎓"},
+        {"name": "Dr. Sanjay Kumar",     "role": "Mentor & Advisor",             "bio": "Associate Professor advising on medical applications, healthcare integration, and clinical accuracy.", "photo": "", "emoji": "⚕️"}
     ],
     "events": [
         {"title": "Healthcare Innovation Summit", "date": "Mar 2026", "location": "Banjul, The Gambia",
@@ -75,21 +75,22 @@ DEFAULT_DATA = {
         {"icon": "🌐", "name": "Global Health NGO",        "type": "NGO",        "desc": "Funding and deploying AiDoBot in underserved communities."},
         {"icon": "💊", "name": "PharmaCare Network",       "type": "Healthcare", "desc": "Pharmacy network enabling home medicine delivery."}
     ],
-    "social": {"youtube": "#", "facebook": "#", "instagram": "#", "whatsapp": "https://wa.me/918800510790"},
-    "latest_youtube": ""
+    "social": {"youtube": "#", "facebook": "#", "instagram": "#", "whatsapp": "https://wa.me/918800510790", "tiktok": "", "linkedin": ""},
+    "latest_youtube": "",
+    "ai_robot_video":    "",
+    "popup_greeting":    "Hello! I'm AiDoBot, your AI healthcare companion. Would you like to learn more about how I can bring quality healthcare to you?",
+    "chatbot_name":      "AiDoBot Assistant",
+    "chatbot_greeting":  "Hi! I'm AiDoBot's AI assistant. Ask me anything about AiDoBot — our features, how it works, team, or pricing!",
+    "chatbot_emoji":     "🤖",
+    "ai_knowledge_base": "AiDoBot is an AI-powered medical robot. Features: heart rate, SpO2, temperature, blood pressure, weight/height, AI face analysis, video doctor consultations, digital prescriptions, home medicine delivery. Contact: hello@aidoBot.com"
 }
 
-# ─── DATABASE HELPERS ────────────────────────────────────────
-
+# ─── DB HELPERS ──────────────────────────────────────────────
 def parse_db_url(url):
-    """Parse full Neon connection string into pg8000 kwargs."""
-    # Remove protocol prefix
     url = url.replace("postgresql://", "").replace("postgres://", "")
-    # Separate query params
     if "?" in url:
         url, _ = url.split("?", 1)
-    # Split user:pass@host/db
-    at      = url.rindex("@")
+    at       = url.rindex("@")
     userpass = url[:at]
     hostdb   = url[at+1:]
     user, password = userpass.split(":", 1) if ":" in userpass else (userpass, "")
@@ -97,27 +98,36 @@ def parse_db_url(url):
         hostport, database = hostdb.rsplit("/", 1)
     else:
         hostport, database = hostdb, "neondb"
-    if ":" in hostport:
-        host, port = hostport.rsplit(":", 1)
-        port = int(port)
-    else:
-        host, port = hostport, 5432
+    host, port = (hostport.rsplit(":", 1)[0], int(hostport.rsplit(":", 1)[1])) if ":" in hostport else (hostport, 5432)
     return dict(host=host, port=port, user=user, password=password, database=database)
 
 def get_conn():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL environment variable is not set!")
-    params = parse_db_url(DATABASE_URL)
-    return pg8000.native.Connection(ssl_context=True, **params)
+        raise RuntimeError("DATABASE_URL not set!")
+    return pg8000.native.Connection(ssl_context=True, **parse_db_url(DATABASE_URL))
 
 def init_db():
     conn = get_conn()
+    # Site data table (key-value)
     conn.run("""
         CREATE TABLE IF NOT EXISTS site_data (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
     """)
+    # Contact messages table
+    conn.run("""
+        CREATE TABLE IF NOT EXISTS contact_messages (
+            id         SERIAL PRIMARY KEY,
+            first      TEXT,
+            last       TEXT,
+            email      TEXT,
+            org        TEXT,
+            message    TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+    # Seed defaults
     for key, value in DEFAULT_DATA.items():
         conn.run(
             "INSERT INTO site_data (key, value) VALUES (:key, :value) ON CONFLICT (key) DO NOTHING;",
@@ -129,8 +139,7 @@ def init_db():
 def db_set(key, value):
     conn = get_conn()
     conn.run(
-        """INSERT INTO site_data (key, value) VALUES (:key, :value)
-           ON CONFLICT (key) DO UPDATE SET value = :value;""",
+        "INSERT INTO site_data (key, value) VALUES (:key, :value) ON CONFLICT (key) DO UPDATE SET value = :value;",
         key=key, value=json.dumps(value)
     )
     conn.close()
@@ -151,25 +160,32 @@ def get_data():
     try:
         return jsonify(load_all_data())
     except Exception as e:
-        print("❌ DB error GET /api/data:", e)
+        print("DB error GET /api/data:", e)
         return jsonify(DEFAULT_DATA)
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    db_ok = False
-    try:
-        load_all_data()
-        db_ok = True
-    except Exception as e:
-        print("Health check DB error:", e)
-    return jsonify({
-        "status": "ok",
-        "db_connected": db_ok,
-        "db_url_set": bool(DATABASE_URL),
-        "storage": "neon+cloudinary"
-    })
+    return jsonify({"status": "ok", "storage": "neon+cloudinary"})
 
-# ─── ADMIN ROUTES ────────────────────────────────────────────
+@app.route("/api/contact", methods=["POST"])
+def contact():
+    body = request.json or {}
+    try:
+        conn = get_conn()
+        conn.run(
+            "INSERT INTO contact_messages (first, last, email, org, message) VALUES (:first, :last, :email, :org, :message);",
+            first=body.get("first",""), last=body.get("last",""),
+            email=body.get("email",""), org=body.get("org",""),
+            message=body.get("message","")
+        )
+        conn.close()
+        print(f"📩 Contact from {body.get('email')}: {body.get('message','')[:60]}")
+        return jsonify({"ok": True, "message": "Message received!"})
+    except Exception as e:
+        print("Contact save error:", e)
+        return jsonify({"ok": True, "message": "Message received!"})  # still return ok to user
+
+# ─── ADMIN AUTH ──────────────────────────────────────────────
 
 @app.route("/api/admin/login", methods=["POST"])
 def admin_login():
@@ -181,6 +197,8 @@ def admin_login():
 def require_admin():
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     return token == "admin-token-aidoBot"
+
+# ─── ADMIN: UPLOAD MEDIA ─────────────────────────────────────
 
 @app.route("/api/admin/upload", methods=["POST"])
 def upload_media():
@@ -197,11 +215,9 @@ def upload_media():
         resource_type=resource_type,
         overwrite=False
     )
-    return jsonify({
-        "url":           result["secure_url"],
-        "public_id":     result["public_id"],
-        "resource_type": resource_type
-    })
+    return jsonify({"url": result["secure_url"], "public_id": result["public_id"], "resource_type": resource_type})
+
+# ─── ADMIN: SAVE SECTION DATA ────────────────────────────────
 
 @app.route("/api/admin/update", methods=["POST"])
 def update_data():
@@ -216,23 +232,51 @@ def update_data():
         db_set(section, payload)
         return jsonify({"ok": True})
     except Exception as e:
-        print("❌ DB error on update:", e)
+        print("DB error on update:", e)
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/contact", methods=["POST"])
-def contact():
-    body = request.json or {}
-    print("📩 Contact form:", body)
-    return jsonify({"ok": True, "message": "Message received!"})
+# ─── ADMIN: INBOX ────────────────────────────────────────────
+
+@app.route("/api/admin/inbox", methods=["GET"])
+def get_inbox():
+    if not require_admin():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        conn = get_conn()
+        rows = conn.run("SELECT id, first, last, email, org, message, created_at FROM contact_messages ORDER BY created_at DESC;")
+        conn.close()
+        messages = []
+        for row in rows:
+            messages.append({
+                "id": row[0], "first": row[1], "last": row[2],
+                "email": row[3], "org": row[4], "message": row[5],
+                "created_at": str(row[6]) if row[6] else ""
+            })
+        return jsonify(messages)
+    except Exception as e:
+        print("Inbox error:", e)
+        return jsonify([])
+
+@app.route("/api/admin/inbox/<int:msg_id>", methods=["DELETE"])
+def delete_message(msg_id):
+    if not require_admin():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        conn = get_conn()
+        conn.run("DELETE FROM contact_messages WHERE id = :id;", id=msg_id)
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ─── STARTUP ─────────────────────────────────────────────────
+
 if __name__ == "__main__":
     init_db()
     app.run(debug=True, port=5000)
 else:
-    # Gunicorn entry point
     try:
         init_db()
     except Exception as e:
         print(f"❌ DB init error: {e}")
-        print("⚠️  Check that DATABASE_URL is set correctly in Render environment variables.")
+        print("⚠️  Check DATABASE_URL in Render environment variables.")
