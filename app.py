@@ -88,7 +88,8 @@ DEFAULT_DATA = {
         "deployment": "Available worldwide — hospitals, clinics, communities, homes.",
         "partnerships": "Ministries of Health, hospitals, NGOs — let\'s build together."
     },
-    "ai_robot_video":    "",
+    "avatar_idle_video": "",
+    "avatar_talk_video": "",
     "popup_greeting":    "Hello! I'm AiDoBot, your AI healthcare companion. Would you like to learn more about how I can bring quality healthcare to you?",
     "chatbot_name":      "AiDoBot Assistant",
     "chatbot_greeting":  "Hi! I'm AiDoBot's AI assistant. Ask me anything about AiDoBot — our features, how it works, team, or pricing!",
