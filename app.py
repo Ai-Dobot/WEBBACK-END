@@ -5,6 +5,8 @@ import cloudinary.uploader
 import cloudinary.api
 import os
 import json
+import urllib.request
+import urllib.error
 import pg8000.native
 from dotenv import load_dotenv
 
@@ -22,6 +24,8 @@ cloudinary.config(
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "aidoBot2026!")
 DATABASE_URL   = os.getenv("DATABASE_URL", "")
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "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")
+GROQ_MODEL     = "llama-3.3-70b-versatile" 
 
 # ─── DEFAULT DATA ────────────────────────────────────────────
 DEFAULT_DATA = {
@@ -77,6 +81,13 @@ DEFAULT_DATA = {
     ],
     "social": {"youtube": "#", "facebook": "#", "instagram": "#", "whatsapp": "https://wa.me/918800510790", "tiktok": "", "linkedin": ""},
     "latest_youtube": "",
+    "contact_info": {
+        "email1": "hello@aidoBot.com",
+        "email2": "info@aidoBot.com",
+        "whatsapp": "+91 8800 510 790",
+        "deployment": "Available worldwide — hospitals, clinics, communities, homes.",
+        "partnerships": "Ministries of Health, hospitals, NGOs — let\'s build together."
+    },
     "ai_robot_video":    "",
     "popup_greeting":    "Hello! I'm AiDoBot, your AI healthcare companion. Would you like to learn more about how I can bring quality healthcare to you?",
     "chatbot_name":      "AiDoBot Assistant",
