@@ -33,13 +33,14 @@ SLOT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,120}$")
 def create_app() -> Flask:
     app = Flask(__name__)
 
-    # --- CORS: restrict to allowed origins. Production: set ALLOWED_ORIGINS to your GitHub Pages URL(s) ---
+    # --- CORS: allowed origins. Override with ALLOWED_ORIGINS (comma-separated) on Render if needed ---
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
     if allowed_origins:
         origins = [o.strip() for o in allowed_origins.split(",") if o.strip()]
     else:
-        # Default: localhost only (production must set ALLOWED_ORIGINS e.g. https://youruser.github.io)
+        # Default: GitHub Pages site + localhost for dev
         origins = [
+            "https://ai-dobot.github.io",
             "http://localhost:3000",
             "http://127.0.0.1:5500",
             "http://localhost:5000",
